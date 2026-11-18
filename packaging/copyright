@@ -1,0 +1,26 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: gst-plugins-bad (openaptx plugin only)
+Upstream-Contact: gstreamer-devel@lists.freedesktop.org
+Source: https://gstreamer.freedesktop.org/src/gst-plugins-bad/
+Comment: Built from the gst-plugins-bad1.0 source package of the target
+ distribution; only ext/openaptx/ is compiled and shipped. Packaging scripts:
+ https://github.com/b0bbywan/gstreamer1.0-openaptx (LGPL-2.1+).
+
+Files: ext/openaptx/*
+Copyright: 2020 Igor V. Kovalenko <igor.v.kovalenko@gmail.com>
+           2020 Thomas Weißschuh <thomas@t-8ch.de>
+License: LGPL-2+
+
+License: LGPL-2+
+ This library is free software; you can redistribute it and/or
+ modify it under the terms of the GNU Library General Public
+ License as published by the Free Software Foundation; either
+ version 2 of the License, or (at your option) any later version.
+ .
+ This library is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ Library General Public License for more details.
+ .
+ On Debian systems, the complete text of the GNU Library General Public
+ License version 2 can be found in "/usr/share/common-licenses/LGPL-2".

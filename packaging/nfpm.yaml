@@ -1,0 +1,70 @@
+# gstreamer1.0-openaptx — the openaptx plugin of gst-plugins-bad, alone.
+#
+# Env from scripts/build-deb.sh: OPENAPTX_VERSION, OPENAPTX_ARCH,
+# OPENAPTX_MULTIARCH. contents[].src are relative: nfpm runs from the staging
+# dir, where the builder exported the plugin and the script dropped copyright.
+
+name: gstreamer1.0-openaptx
+arch: ${OPENAPTX_ARCH}
+platform: linux
+version: ${OPENAPTX_VERSION}
+section: libs
+priority: optional
+maintainer: "Mathieu Réquillart <mathieu.requillart@gmail.com>"
+description: |
+  GStreamer aptX / aptX HD plugin (openaptx), without the rest of plugins-bad.
+  Provides the openaptxenc and openaptxdec elements, built against libfreeaptx,
+  so that PulseAudio's Bluetooth module offers the aptX and aptX HD A2DP codecs
+  without pulling in the whole gstreamer1.0-plugins-bad package.
+vendor: Odio
+homepage: https://gstreamer.freedesktop.org/documentation/openaptx/
+license: LGPL-2.0-or-later
+
+contents:
+  - src: ./libgstopenaptx.so
+    dst: /usr/lib/${OPENAPTX_MULTIARCH}/gstreamer-1.0/libgstopenaptx.so
+    # nfpm only substitutes env vars in contents when asked to.
+    expand: true
+    file_info:
+      mode: 0644
+
+  - src: ./README
+    dst: /usr/share/doc/gstreamer1.0-openaptx/README
+  - src: ./copyright
+    dst: /usr/share/doc/gstreamer1.0-openaptx/copyright
+
+overrides:
+  deb:
+    depends:
+      # Measured NEEDED set: libgstaudio-1.0, libgstbase-1.0, libgstreamer-1.0,
+      # libgobject-2.0, libglib-2.0, libfreeaptx, libc. The builder prints it on
+      # every build. Versions are what dpkg-shlibdeps derives on trixie.
+      - libgstreamer1.0-0 (>= 1.26.2)
+      - libgstreamer-plugins-base1.0-0 (>= 1.26.2)
+      - libglib2.0-0t64 (>= 2.80.0)
+      - libfreeaptx0 (>= 0.1.1)
+      # Keeps the package off any release but trixie; the glibc-floor gate in
+      # CI holds the binary to it.
+      - libc6 (>= 2.41)
+      # Not linked: PulseAudio's GStreamer codec pipeline is
+      # appsrc ! openaptxenc ! appsink, and appsrc/appsink are the "app" plugin
+      # of plugins-base. Without it aptX silently never shows up.
+      - gstreamer1.0-plugins-base (>= 1.26)
+    # plugins-bad ships the same file (libgstopenaptx.so) and has priority.
+    #
+    # - Conflicts: the two packages cannot be installed together.
+    # - No Replaces: this package may never overwrite plugins-bad's file.
+    #
+    # Result:
+    # - installing plugins-bad removes this package;
+    # - installing this package while plugins-bad is present would remove
+    #   plugins-bad, so the installer must skip this package when plugins-bad
+    #   is there.
+    conflicts:
+      - gstreamer1.0-plugins-bad
+
+deb:
+  compression: xz
+  fields:
+    Multi-Arch: same
+    Enhances: pulseaudio-module-bluetooth
