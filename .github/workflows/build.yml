@@ -1,0 +1,141 @@
+name: Build
+
+on:
+  push:
+    tags: ['v*']
+    # Branch pushes build GST_DEV_VERSION and publish nothing — the release job
+    # is tag-only. This is how the pipeline gets exercised before a tag is cut.
+    branches: ['**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # The GStreamer trixie ships, and therefore what a branch push builds. Trixie
+  # keeps it for its whole lifetime; bump it with the distribution.
+  GST_DEV_VERSION: 1.26.2
+
+jobs:
+  # Not odio-ci's resolve-version: that one asks the upstream repo for its
+  # latest GitHub release on branch pushes, and GStreamer has none (it lives on
+  # gitlab.freedesktop.org) — nor would its latest release be the one trixie
+  # ships. The tag convention is the same.
+  resolve:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.pick.outputs.version }}
+      gst_version: ${{ steps.pick.outputs.gst_version }}
+    steps:
+      - name: Resolve
+        id: pick
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ "${REF_TYPE}" = "tag" ]; then
+            # v1.26.2        → 1.26.2
+            # v1.26.2-rc1    → 1.26.2~rc1 (sorts below 1.26.2; testing suite)
+            # v1.26.2+odio1  → 1.26.2+odio1 (packaging-only respin, same source)
+            VERSION="$(echo "${REF_NAME}" | sed -E 's/^v//; s/-(rc|beta|alpha)/~\1/')"
+            GST_VERSION="$(echo "${VERSION}" | sed -E 's/[~+].*$//')"
+          else
+            # Nothing is published, so 0.0.0 sorts below every real release in
+            # case one ever escapes as an artifact.
+            GST_VERSION="${GST_DEV_VERSION}"
+            VERSION="0.0.0+ci.${GITHUB_SHA:0:7}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "gst_version=${GST_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "${REF_NAME} → package ${VERSION}, GStreamer ${GST_VERSION}"
+
+  build:
+    name: Build ${{ matrix.arch }}
+    needs: resolve
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ matrix.timeout }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            qemu: false
+            timeout: 30
+          # Native arm64 runner — no emulation.
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            qemu: false
+            timeout: 30
+          # armhf is arm/v6 in a Raspberry Pi OS rootfs. GitHub's arm64 runners
+          # cannot execute AArch32, so this is QEMU either way; three C files,
+          # but meson configuring all of plugins-bad under emulation is slow.
+          - arch: armhf
+            runner: ubuntu-latest
+            qemu: true
+            timeout: 90
+            cpu_arch: v6
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up QEMU
+        if: matrix.qemu
+        uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Install nfpm
+        run: |
+          echo 'deb [trusted=yes] https://repo.goreleaser.com/apt/ /' \
+            | sudo tee /etc/apt/sources.list.d/goreleaser.list
+          sudo apt-get update
+          sudo apt-get install -y nfpm
+          nfpm --version
+
+      - name: Build .deb
+        env:
+          BUILDX_CACHE_ARGS: >-
+            --cache-from type=gha,scope=${{ matrix.arch }}
+            --cache-to type=gha,scope=${{ matrix.arch }},mode=max
+        run: |
+          ./scripts/build-deb.sh \
+            --arch ${{ matrix.arch }} \
+            --version ${{ needs.resolve.outputs.version }} \
+            --gst-version ${{ needs.resolve.outputs.gst_version }}
+
+      - name: Check binary
+        uses: b0bbywan/odio-ci/actions/check-binary@v1.0.3
+        with:
+          binary: dist/stage-${{ matrix.arch }}/libgstopenaptx.so
+          arch: ${{ matrix.arch }}
+          # Trixie's glibc; packaging/nfpm.yaml declares libc6 (>= 2.41).
+          glibc_max: '2.41'
+          expect_cpu_arch: ${{ matrix.cpu_arch || '' }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: openaptx-${{ matrix.arch }}-deb
+          path: dist/*.deb
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Release and reindex
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    uses: b0bbywan/odio-ci/.github/workflows/release.yml@v1.0.3
+    with:
+      artifact_pattern: openaptx-*-deb
+    secrets:
+      apt_repo_token: ${{ secrets.APT_REPO_TOKEN }}
